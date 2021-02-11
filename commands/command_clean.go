@@ -98,13 +98,9 @@ func cleanCommand(cmd *cobra.Command, args []string) {
 	}
 
 	gitfilter := lfs.NewGitFilter(cfg)
-	ptr, err := clean(gitfilter, os.Stdout, os.Stdin, fileName, -1)
+	_, err := clean(gitfilter, os.Stdout, os.Stdin, fileName, -1)
 	if err != nil {
 		Error(err.Error())
-	}
-
-	if ptr != nil && possiblyMalformedObjectSize(ptr.Size) {
-		Error("Possibly malformed conversion on Windows, see `git lfs help smudge` for more details.")
 	}
 }
 

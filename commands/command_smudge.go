@@ -10,7 +10,6 @@ import (
 	"github.com/git-lfs/git-lfs/git"
 	"github.com/git-lfs/git-lfs/lfs"
 	"github.com/git-lfs/git-lfs/tools"
-	"github.com/git-lfs/git-lfs/tools/humanize"
 	"github.com/git-lfs/git-lfs/tq"
 	"github.com/spf13/cobra"
 )
@@ -97,26 +96,26 @@ func delayedSmudge(gf *lfs.GitFilter, s *git.FilterProcessScanner, to io.Writer,
 // Any errors encountered along the way will be returned immediately if they
 // were non-fatal, otherwise execution will halt and the process will be
 // terminated by using the `commands.Panic()` func.
-func smudge(gf *lfs.GitFilter, to io.Writer, from io.Reader, filename string, skip bool, filter *filepathfilter.Filter) (int64, error) {
+func smudge(gf *lfs.GitFilter, to io.Writer, from io.Reader, filename string, skip bool, filter *filepathfilter.Filter) error {
 	ptr, pbuf, perr := lfs.DecodeFrom(from)
 	if perr != nil {
 		n, err := tools.Spool(to, pbuf, cfg.TempDir())
 		if err != nil {
-			return 0, errors.Wrap(err, perr.Error())
+			return errors.Wrap(err, perr.Error())
 		}
 
 		if n != 0 {
-			return 0, errors.NewNotAPointerError(errors.Errorf(
+			return errors.NewNotAPointerError(errors.Errorf(
 				"Unable to parse pointer at: %q", filename,
 			))
 		}
-		return 0, nil
+		return nil
 	}
 
 	lfs.LinkOrCopyFromReference(cfg, ptr.Oid, ptr.Size)
 	cb, file, err := gf.CopyCallbackFile("download", filename, 1, 1)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	download := !skip
@@ -124,7 +123,7 @@ func smudge(gf *lfs.GitFilter, to io.Writer, from io.Reader, filename string, sk
 		download = filter.Allows(filename)
 	}
 
-	n, err := gf.Smudge(to, ptr, filename, download, getTransferManifestOperationRemote("download", cfg.Remote()), cb)
+	_, err = gf.Smudge(to, ptr, filename, download, getTransferManifestOperationRemote("download", cfg.Remote()), cb)
 	if file != nil {
 		file.Close()
 	}
@@ -145,7 +144,7 @@ func smudge(gf *lfs.GitFilter, to io.Writer, from io.Reader, filename string, sk
 		}
 	}
 
-	return n, nil
+	return nil
 }
 
 func smudgeCommand(cmd *cobra.Command, args []string) {
@@ -158,14 +157,12 @@ func smudgeCommand(cmd *cobra.Command, args []string) {
 	filter := filepathfilter.New(cfg.FetchIncludePaths(), cfg.FetchExcludePaths())
 	gitfilter := lfs.NewGitFilter(cfg)
 
-	if n, err := smudge(gitfilter, os.Stdout, os.Stdin, smudgeFilename(args), smudgeSkip, filter); err != nil {
+	if err := smudge(gitfilter, os.Stdout, os.Stdin, smudgeFilename(args), smudgeSkip, filter); err != nil {
 		if errors.IsNotAPointerError(err) {
 			fmt.Fprintln(os.Stderr, err.Error())
 		} else {
 			Error(err.Error())
 		}
-	} else if possiblyMalformedObjectSize(n) {
-		fmt.Fprintln(os.Stderr, "Possibly malformed smudge on Windows: see `git lfs help smudge` for more info.")
 	}
 }
 
@@ -174,10 +171,6 @@ func smudgeFilename(args []string) string {
 		return args[0]
 	}
 	return "<unknown file>"
-}
-
-func possiblyMalformedObjectSize(n int64) bool {
-	return n > 4*humanize.Gigabyte
 }
 
 func init() {

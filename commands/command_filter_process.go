@@ -64,12 +64,10 @@ func filterCommand(cmd *cobra.Command, args []string) {
 
 	var q *tq.TransferQueue
 	var malformed []string
-	var malformedOnWindows []string
 	var closeOnce *sync.Once
 	var available chan *tq.Transfer
 	gitfilter := lfs.NewGitFilter(cfg)
 	for s.Scan() {
-		var n int64
 		var err error
 		var delayed bool
 		var w *git.PktlineWriter
@@ -81,12 +79,7 @@ func filterCommand(cmd *cobra.Command, args []string) {
 			s.WriteStatus(statusFromErr(nil))
 			w = git.NewPktlineWriter(os.Stdout, cleanFilterBufferCapacity)
 
-			var ptr *lfs.Pointer
-			ptr, err = clean(gitfilter, w, req.Payload, req.Header["pathname"], -1)
-
-			if ptr != nil {
-				n = ptr.Size
-			}
+			_, err = clean(gitfilter, w, req.Payload, req.Header["pathname"], -1)
 		case "smudge":
 			if q == nil && supportsDelay {
 				closeOnce = new(sync.Once)
@@ -105,7 +98,7 @@ func filterCommand(cmd *cobra.Command, args []string) {
 			if req.Header["can-delay"] == "1" {
 				var ptr *lfs.Pointer
 
-				n, delayed, ptr, err = delayedSmudge(gitfilter, s, w, req.Payload, q, req.Header["pathname"], skip, filter)
+				_, delayed, ptr, err = delayedSmudge(gitfilter, s, w, req.Payload, q, req.Header["pathname"], skip, filter)
 
 				if delayed {
 					ptrs[req.Header["pathname"]] = ptr
@@ -117,7 +110,7 @@ func filterCommand(cmd *cobra.Command, args []string) {
 					break
 				}
 
-				n, err = smudge(gitfilter, w, from, req.Header["pathname"], skip, filter)
+				err = smudge(gitfilter, w, from, req.Header["pathname"], skip, filter)
 				if err == nil {
 					delete(ptrs, req.Header["pathname"])
 				}
@@ -175,8 +168,6 @@ func filterCommand(cmd *cobra.Command, args []string) {
 		if errors.IsNotAPointerError(err) {
 			malformed = append(malformed, req.Header["pathname"])
 			err = nil
-		} else if possiblyMalformedObjectSize(n) {
-			malformedOnWindows = append(malformedOnWindows, req.Header["pathname"])
 		}
 
 		var status git.FilterProcessStatus
@@ -207,16 +198,6 @@ func filterCommand(cmd *cobra.Command, args []string) {
 		for _, m := range malformed {
 			fmt.Fprintf(os.Stderr, "\t%s\n", m)
 		}
-	}
-
-	if len(malformedOnWindows) > 0 && cfg.Git.Bool("lfs.largefilewarning", true) {
-		fmt.Fprintf(os.Stderr, "Encountered %d file(s) that may not have been copied correctly on Windows:\n", len(malformedOnWindows))
-
-		for _, m := range malformedOnWindows {
-			fmt.Fprintf(os.Stderr, "\t%s\n", m)
-		}
-
-		fmt.Fprintf(os.Stderr, "\nSee: `git lfs help smudge` for more details.\n")
 	}
 
 	if err := s.Err(); err != nil && err != io.EOF {
